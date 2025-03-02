@@ -1,0 +1,343 @@
+import pygame
+import random
+import sqlite3
+
+# Инициализация Pygame
+pygame.init()
+
+# Настройки экрана
+WIDTH, HEIGHT = 800, 600
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("Цветные шары")
+
+# Цвета
+GREEN = (0, 255, 0)
+RED = (255, 0, 0)
+WHITE = (255, 255, 255)
+
+# Загрузка звуков
+click_sound = pygame.mixer.Sound('click_sound.mp3')
+
+# Шары
+class Ball:
+    def __init__(self, color, direction = 'down'):
+        self.color = color
+        self.x = random.randint(20, WIDTH - 20)  # Случайная позиция по горизонтали
+        self.y = 0  # Начальная позиция по вертикали
+        self.speed = 5
+        self.direction = direction
+
+    def fall(self):
+        if self.direction == 'down':
+            self.y += self.speed
+        elif self.direction == 'left':
+            self.x -= self.speed
+        elif self.direction == 'right':
+            self.x += self.speed
+
+    def draw(self):
+        pygame.draw.circle(screen, self.color, (self.x, self.y), 20)
+
+
+class DB_Manager:
+    def __init__(self):  # Инициализация базы данных
+        conn = sqlite3.connect('scores.db')
+        c = conn.cursor()
+        c.execute('''CREATE TABLE IF NOT EXISTS easy_scores (score INTEGER)''')
+        c.execute('''CREATE TABLE IF NOT EXISTS hard_scores (score INTEGER)''')
+        conn.commit()
+        conn.close()
+
+    def add_new_score(self, score, level):
+        conn = sqlite3.connect('scores.db')
+        c = conn.cursor()
+        table_name = 'easy_scores' if level == 1 else 'hard_scores'
+
+        c.execute(f'SELECT * FROM {table_name} ORDER BY score DESC')
+        scores = c.fetchall()
+
+        if len(scores) < 5:  # Храним только 5 лучших результатов
+            c.execute(f"INSERT INTO {table_name} (score) VALUES (?)", (score,))
+        else:
+            if score > scores[-1][0]:  # Если новый результат лучше самого низкого
+                c.execute(f"DELETE FROM {table_name} WHERE score=(SELECT MIN(score) FROM {table_name})")
+                c.execute(f"INSERT INTO {table_name} (score) VALUES (?)", (score,))
+        conn.commit()
+
+    def get_best_score(self, level):
+        conn = sqlite3.connect('scores.db')
+        c = conn.cursor()
+        table_name = 'easy_scores' if level == 1 else 'hard_scores'
+        c.execute(f"SELECT MAX(score) FROM {table_name}")
+        best_score = c.fetchone()[0]
+        return best_score
+
+    def get_score_from_db(self, level):
+        conn = sqlite3.connect('scores.db')
+        c = conn.cursor()
+        table_name = 'easy_scores' if level == 1 else 'hard_scores'
+        c.execute(f"SELECT score FROM {table_name} ORDER BY score DESC LIMIT 5")
+        scores = c.fetchall()
+        conn.close()
+        return scores
+
+    def is_second_level_unlocked(self):
+        conn = sqlite3.connect('scores.db')
+        c = conn.cursor()
+        c.execute("SELECT MAX(score) FROM easy_scores")
+        max_score = c.fetchone()[0]
+        return max_score is not None and max_score > 50  # Проверка на разблокировку второго уровня
+
+db = DB_Manager()
+# db.get_score_from_db()
+def get_final_score():
+    db.add_new_score(score, lvl)  # Передаем уровень для добавления результата
+    screen.fill(WHITE)
+    font = pygame.font.Font(None, 36)
+    text = font.render(f"Финальный счет: {score}", True, (0, 0, 0))
+    text_rect = text.get_rect(center=(WIDTH / 2, HEIGHT / 2 - 50))
+    screen.blit(text, text_rect)
+
+    best_score_text = font.render(f"Лучший счет: {db.get_best_score(lvl)}", True, (0, 0, 0))
+    best_score_rect = best_score_text.get_rect(center=(WIDTH / 2, HEIGHT / 2 - 100))
+    screen.blit(best_score_text, best_score_rect)
+
+    # Проверка на разблокировку второго уровня
+    if lvl == 1 and score > 50:
+        # Логика для разблокировки второго уровня
+        # Здесь можно добавить уведомление о разблокировке
+        unlock_text = font.render("Сложный уровень разблокирован!", True, (0, 255, 0))
+        unlock_rect = unlock_text.get_rect(center=(WIDTH / 2, HEIGHT / 2));
+        screen.blit(unlock_text, unlock_rect)
+
+    pygame.display.flip()
+
+    # Ожидание нажатия клавиши перед выходом
+    waiting = True
+    while waiting:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                return
+            if event.type == pygame.MOUSEBUTTONDOWN:  # Ожидание нажатия клавиши
+                waiting = False
+    else:
+        menu()
+
+def show_scores():
+    screen.fill(WHITE)
+    font = pygame.font.Font(None, 36)
+
+    # Заголовки для уровней
+    easy_title_text = font.render("Легкий уровень", True, (0, 0, 0))
+    easy_title_rect = easy_title_text.get_rect(center=(WIDTH / 4, HEIGHT / 10))
+    screen.blit(easy_title_text, easy_title_rect)
+
+    hard_title_text = font.render("Сложный уровень", True, (0, 0, 0))
+    hard_title_rect = hard_title_text.get_rect(center=(3 * WIDTH / 4, HEIGHT / 10))
+    screen.blit(hard_title_text, hard_title_rect)
+
+    # Получаем рекорды для обоих уровней
+    easy_scores = db.get_score_from_db(1)
+    hard_scores = db.get_score_from_db(3)
+
+    # Отображаем рекорды легкого уровня
+    for index, (score,) in enumerate(easy_scores):
+        score_text = font.render(f'{index + 1}. {score}', True, (0, 0, 0))
+        score_rect = score_text.get_rect(center=(WIDTH / 4, HEIGHT / 10 + (index + 1) * 30 + 30))  # Сдвигаем вниз
+        screen.blit(score_text, score_rect)
+
+    # Отображаем рекорды сложного уровня
+    for index, (score,) in enumerate(hard_scores):
+        score_text = font.render(f'{index + 1}. {score}', True, (0, 0, 0))
+        score_rect = score_text.get_rect(center=(3 * WIDTH / 4, HEIGHT / 10 + (index + 1) * 30 + 30))  # Сдвигаем вниз
+        screen.blit(score_text, score_rect)
+
+    # Назад кнопка
+    back_text = font.render("Нажмите, чтобы вернуться в меню", True, (0, 0, 0))
+    back_rect = back_text.get_rect(center=(WIDTH / 2, HEIGHT - 50))
+    screen.blit(back_text, back_rect)
+
+    pygame.display.flip()
+
+    waiting = True
+    while waiting:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                return
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                waiting = False
+
+
+def menu_select_lvl():
+    screen.fill(WHITE)
+    font = pygame.font.Font(None, 36)
+    title_text = font.render("Выберите уровень сложности", True, (0, 0, 0))
+    title_rect = title_text.get_rect(center=(WIDTH / 2, HEIGHT / 10))
+    screen.blit(title_text, title_rect)
+
+    easy_text = font.render("Легкий", True, (0, 0, 0))
+    easy_rect = easy_text.get_rect(center=(WIDTH / 2, HEIGHT / 10 + 100))
+    screen.blit(easy_text, easy_rect)
+
+    # Проверка доступности второго уровня
+    if db.is_second_level_unlocked():
+        hard_text = font.render("Сложный", True, (0, 0, 0))
+        hard_rect = hard_text.get_rect(center=(WIDTH / 2, HEIGHT / 10 + 150))
+        screen.blit(hard_text, hard_rect)
+    else:
+        hard_text = font.render("Сложный (заблокирован)", True, (150, 150, 150))
+        hard_rect = hard_text.get_rect(center=(WIDTH / 2, HEIGHT / 10 + 150))
+        screen.blit(hard_text, hard_rect)
+
+    pygame.display.flip()
+    waiting = True
+    while waiting:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                return
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if easy_rect.collidepoint(event.pos):
+                    return 1
+                elif hard_rect.collidepoint(event.pos) and db.is_second_level_unlocked():
+                    return 3
+
+
+def menu():
+    # db.add_new_score(123)
+    global menu_run
+    menu_run = True
+    while menu_run:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                menu_run = False  # Set menu_run to False to exit the loop
+                pygame.quit()
+                return
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                mouse_x, mouse_y = event.pos
+
+                # Нажатие на кнопку "Играть"
+                if WIDTH / 2 - 100 < mouse_x < WIDTH / 2 + 100 and HEIGHT / 2 - 50 < mouse_y < HEIGHT / 2:
+                    # main()
+                    global lvl
+                    lvl = menu_select_lvl()
+                    main(lvl)
+
+
+                # Нажатие на кнопку "Таблица рекордов"
+                elif WIDTH / 2 - 100 < mouse_x < WIDTH / 2 + 100 and HEIGHT / 2 < mouse_y < HEIGHT / 2 + 50:
+                    show_scores()
+
+        screen.fill(WHITE)
+        font = pygame.font.Font(None, 36)
+
+        # Заголовок игры
+        title_text = font.render("Цветные шары", True, (0, 0, 0))
+        title_rect = title_text.get_rect(center=(WIDTH / 2, HEIGHT / 2 - 100))
+        screen.blit(title_text, title_rect)
+
+        # Кнопка "Играть"
+        play_button_text = font.render("Играть", True, (0, 0, 0))
+        play_button_rect = play_button_text.get_rect(center=(WIDTH / 2, HEIGHT / 2 - 25))
+        pygame.draw.rect(screen, (200, 200, 200), play_button_rect.inflate(20, 20))  # Кнопка
+        screen.blit(play_button_text, play_button_rect)
+
+        # Кнопка "Таблица рекордов"
+        scores_button_text = font.render("Таблица рекордов", True, (0, 0, 0))
+        scores_button_rect = scores_button_text.get_rect(center=(WIDTH / 2, HEIGHT / 2 + 25))
+        pygame.draw.rect(screen, (200, 200, 200), scores_button_rect.inflate(20, 20))  # Кнопка
+        screen.blit(scores_button_text, scores_button_rect)
+
+
+        pygame.display.flip()
+
+
+
+# Основная функция игры
+def main(lvl):
+    global menu_run, score
+    menu_run = False
+
+    clock = pygame.time.Clock()
+    balls = []  # Шары
+    score = 0  # Начальное количество очков
+    lives = 10  # Количество жизней
+
+    while lives > 0:
+        screen.fill(WHITE)
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                return
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                mouse_x, mouse_y = event.pos
+                for ball in balls:
+                    if ball.color == GREEN and (ball.x - 20 < mouse_x < ball.x + 20) and (ball.y - 20 < mouse_y < ball.y + 20):
+                        score += 1
+                        click_sound.play()  # Воспроизведение звука при нажатии на зеленый шар
+                        balls.remove(ball)
+                    elif ball.color == RED and (ball.x - 20 < mouse_x < ball.x + 20) and (ball.y - 20 < mouse_y < ball.y + 20):
+                        lives -= 1
+                        balls.remove(ball)
+
+        # Добавление новых шаров
+        if random.random() < 0.02 * lvl:  # 5% шанс появления нового шара
+            color = GREEN if random.random() < 0.5 else RED  # Тернарное выражение
+
+            # Проверяем количество зеленых шаров на экране
+            green_balls_count = sum(1 for ball in balls if ball.color == GREEN)
+
+            if lvl == 1:  # Легкий уровень
+                if green_balls_count < 4:  # Ограничение до 4 зеленых шаров
+                    balls.append(Ball(color, direction='down'))  # Шары только сверху
+            elif lvl == 3:  # Сложный уровень
+                if green_balls_count < 4 or color == RED:  # Ограничение до 4 зеленых шаров, красные могут добавляться без ограничений
+                    # Случайное направление появления шаров
+                    direction = random.choice(['down', 'left', 'right'])
+                    if direction == 'down':
+                        balls.append(Ball(color, direction='down'))  # Шары сверху
+                    elif direction == 'left':
+                        x_position = WIDTH  # Начальная позиция справа
+                        balls.append(Ball(color, direction='left'))
+                        balls[-1].x = x_position
+                        balls[-1].y = random.randint(20, HEIGHT - 20)  # Случайная позиция по вертикали
+                    elif direction == 'right':
+                        x_position = 0  # Начальная позиция слева
+                        balls.append(Ball(color, direction='right'))
+                        balls[-1].x = x_position
+                        balls[-1].y = random.randint(20, HEIGHT - 20)  # Случайная позиция по вертикали
+
+        # Обновление и отрисовка шаров
+        for ball in balls:
+            ball.fall()
+            ball.draw()
+            # Удаляем шары если:
+            if ball.y > HEIGHT:  # Если шар достиг нижней границы
+                if ball.color == GREEN:  # Если это зеленый шар
+                    lives -= 1  # За зеленые снимаем здоровье
+                balls.remove(ball)
+            elif ball.x < 0 or ball.x > WIDTH:  # Если шар вышел за границы по горизонтали
+                if ball.color == GREEN:  # Если это зеленый шар
+                    lives -= 1  # За зеленые снимаем здоровье
+                balls.remove(ball)
+
+        # Отображение счета и жизней
+        font = pygame.font.Font(None, 36)
+        text = font.render(f'Score: {score} Lives: {lives}', True, (0, 0, 0))
+        screen.blit(text, (10, 10))
+
+        best_score_text = font.render(f'Best score: {db.get_best_score(lvl)}', True, (0, 0, 0))
+        screen.blit(best_score_text, (10, 40))
+
+        pygame.display.flip()
+        clock.tick(60)
+
+    else:
+        get_final_score()  # Возвращаем счет при окончании игры
+
+
+
+if __name__ == "__main__":
+    menu()
